@@ -27,7 +27,7 @@ bool isArray(JsonbValue *v);
 JsonbValue toJsonbString(Datum str);
 /* static void recursiveAny(JsonbValue *jb); */
 
-PG_FUNCTION_INFO_V1(nicola);
+PG_FUNCTION_INFO_V1(jsonb_extract);
 
 char *toStr(JsonbValue *v){
   Jsonb	*j;
@@ -49,7 +49,7 @@ bool isArray(JsonbValue *v){
 
 
 Datum
-nicola(PG_FUNCTION_ARGS)
+jsonb_extract(PG_FUNCTION_ARGS)
 {
   Jsonb *jb = PG_GETARG_JSONB(0);
   ArrayType  *path = PG_GETARG_ARRAYTYPE_P(1);
