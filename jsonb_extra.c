@@ -14,25 +14,38 @@ PG_MODULE_MAGIC;
 
 typedef struct JbqResult
 {
-	JsonbValue	  **result;
-	int			size;
-	int			count;
+  Jsonb **result;
+  int  size;
+  int count;
 } JbqResult;
 
-char *toStr(JsonbValue *v);
+char *JsbvToStr(JsonbValue *v);
 void debugJsonb(JsonbValue *jb);
-char *toStr(JsonbValue *v);
 void walk(JbqResult *result, JsonbValue *jb, Datum *path, int level, int size);
 bool isArray(JsonbValue *v);
+void addJbqResult(JbqResult *result, JsonbValue *val);
+
 JsonbValue toJsonbString(Datum str);
 /* static void recursiveAny(JsonbValue *jb); */
 
 PG_FUNCTION_INFO_V1(jsonb_extract);
 
-char *toStr(JsonbValue *v){
+char *JsbvToStr(JsonbValue *v){
   Jsonb	*j;
   j = JsonbValueToJsonb(v);
   return JsonbToCString(NULL, &j->root, VARSIZE(j));
+}
+
+char *JbToStr(Jsonb *v){
+  return JsonbToCString(NULL, v, VARSIZE(v));
+}
+
+void addJbqResult(JbqResult *result, JsonbValue *val){
+  if (result->count >= result->size){
+    result->size *= 2;
+    result->result = repalloc(result->result, sizeof(Jsonb *) * result->size);
+  }
+  result->result[result->count++] = JsonbValueToJsonb(val);
 }
 
 bool isArray(JsonbValue *v){
@@ -46,9 +59,7 @@ bool isArray(JsonbValue *v){
   }
 }
 
-
-
-Datum
+  Datum
 jsonb_extract(PG_FUNCTION_ARGS)
 {
   Jsonb *jb = PG_GETARG_JSONB(0);
@@ -61,6 +72,7 @@ jsonb_extract(PG_FUNCTION_ARGS)
 
   JsonbValue	jbv;
   JbqResult *result;
+  ArrayType  *result_array;
 
   result = palloc(sizeof(JbqResult));
   result->size = 256;
@@ -78,15 +90,22 @@ jsonb_extract(PG_FUNCTION_ARGS)
 
   elog(INFO, "Result count: %i", result->count);
 
-	for (i = 0; i < result->count; i++){
-    elog(INFO, "* %s", toStr(result->result[i]));
-  }
-	/* for (i = 0; i < state->result_count; i++) */
-	/* 	pfree(state->result[i]); */
-	/* pfree(state->result); */
-	/* pfree(state); */
+  if(result->count > 0){
+    result_array = construct_array( &result->result, result->count, JSONBOID, sizeof(Jsonb *), false, 'i');
 
-  PG_RETURN_NULL();
+    for (i = 0; i < result->count; i++){
+      /* elog(INFO, "* %s", JbToStr(result->result[i])); */
+      pfree(result->result[i]);
+    }
+    pfree(result->result);
+    pfree(result);
+  }
+
+  if(result->count > 0){
+    PG_RETURN_POINTER(result_array);
+  }else{
+    PG_RETURN_NULL();
+  }
 }
 
 JsonbValue toJsonbString(Datum str){
@@ -109,14 +128,15 @@ void walk(JbqResult *result, JsonbValue *jb, Datum *path, int level, int size){
   /* debugJsonb(jb); */
 
   if (level == size){
-    if (result->count >= result->size){
-      result->size *= 2;
-      result->result = repalloc(result->result, sizeof(JsonbValue *) * result->size);
-    }
-    result->result[result->count++] = jb;
+    /* if (result->count >= result->size){ */
+    /*   result->size *= 2; */
+    /*   result->result = repalloc(result->result, sizeof(JsonbValue *) * result->size); */
+    /* } */
+    /* result->result[result->count++] = jb; */
+    addJbqResult(result, jb);
     return;
   }else{
-    elog(NOTICE, "take %s of %s", TextDatumGetCString(path[level]), toStr(jb));
+    elog(NOTICE, "take %s of %s", TextDatumGetCString(path[level]), JsbvToStr(jb));
   }
 
   if(jb->type == jbvBinary){
@@ -186,7 +206,7 @@ void walk(JbqResult *result, JsonbValue *jb, Datum *path, int level, int size){
 /*     jbvp = findJsonbValueFromContainer(container, JB_FOBJECT, &key); */
 /*     elog(NOTICE,"key %s: step %s, %i", */
 /*         TextDatumGetCString(pathtext[i]), */
-/*         toStr(jbvp), */
+/*         JsbvToStr(jbvp), */
 /*         jbvp->type); */
 /*     if(jbvp->type == jbvBinary){ */
 /*       container = (JsonbContainer *) jbvp->val.binary.data; */
@@ -210,10 +230,10 @@ void debugJsonb(JsonbValue *jb){
       elog(INFO, "D:jbvNull");
       break;
     case jbvString:
-      elog(INFO, "D:jbvString, %s", toStr(jb));
+      elog(INFO, "D:jbvString, %s", JsbvToStr(jb));
       break;
     case jbvNumeric:
-      elog(INFO, "D:jbvNumeric, %s", toStr(jb));
+      elog(INFO, "D:jbvNumeric, %s", JsbvToStr(jb));
       break;
     case jbvBool:
       elog(INFO, "D:jbvBool");
@@ -238,30 +258,30 @@ void debugJsonb(JsonbValue *jb){
 /*   int32			 r; */
 /*   JsonbValue v; */
 
-/*   elog(INFO, "ITERATE %s",toStr(jb)); */
+/*   elog(INFO, "ITERATE %s",JsbvToStr(jb)); */
 
 /*   it = JsonbIteratorInit(jb->val.binary.data); */
 /*   while((r = JsonbIteratorNext(&it, &v, false)) != WJB_DONE) */
 /*   { */
 /*     if (r == WJB_KEY) */
 /*     { */
-/*       elog(INFO, "key: %s", toStr(&v)); */
+/*       elog(INFO, "key: %s", JsbvToStr(&v)); */
 /*       r = JsonbIteratorNext(&it, &v, false); */
 /*       Assert(r == WJB_VALUE); */
 /*     } */
 /*     if (r == WJB_VALUE || r == WJB_ELEM) */
 /*     { */
-/*       elog(INFO,"  value type: %i, %s", v.type, toStr(&v)); */
+/*       elog(INFO,"  value type: %i, %s", v.type, JsbvToStr(&v)); */
 /*       switch (v.type) */
 /*       { */
 /*         case jbvNull: */
 /*           elog(INFO, "jbvNull"); */
 /*           break; */
 /*         case jbvString: */
-/*           elog(INFO, "jbvString, %s", toStr(&v)); */
+/*           elog(INFO, "jbvString, %s", JsbvToStr(&v)); */
 /*           break; */
 /*         case jbvNumeric: */
-/*           elog(INFO, "jbvNumeric, %s", toStr(&v)); */
+/*           elog(INFO, "jbvNumeric, %s", JsbvToStr(&v)); */
 /*           break; */
 /*         case jbvBool: */
 /*           elog(INFO, "jbvBool"); */
