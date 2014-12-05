@@ -27,15 +27,13 @@ typedef struct JbvResult
 } JbvResult;
 
 char *JsbvToStr(JsonbValue *v);
-/* char *JbToStr(Jsonb *v); */
 void debugJsonb(JsonbValue *jb);
 void walk(JbvResult *result, JsonbValue *jb, Datum *path, int level, int size);
 bool isArray(JsonbValue *v);
 JsonbValue *JsonbToJsonbValue(Jsonb *v);
-/* void addJbqResult(JbqResult *result, JsonbValue *val); */
 void addToJbvResult(JbvResult *result, JsonbValue *val);
 JbvResult *jsonb_extract_internal(Jsonb *jb, ArrayType *path);
-text *jbvToText(JsonbValue *v);
+text *JsonbValueToText(JsonbValue *v);
 
 JsonbValue toJsonbString(Datum str);
 /* static void recursiveAny(JsonbValue *jb); */
@@ -70,19 +68,35 @@ bool isArray(JsonbValue *v){
 }
 JsonbValue *
 JsonbToJsonbValue(Jsonb *v){
-  JsonbIterator *it = JsonbIteratorInit((JsonbContainer *) &v->root);
+  JsonbValue jv;
+  int r;
+
+  JsonbIterator *it = JsonbIteratorInit(&v->root);
+
+  //this is problem because i return local variable address
+  //but if i switch to JsonbValue *v and call JsonbIteratorNext it fails
+  //should i palloc it?
+  while ((r = JsonbIteratorNext(&it, &jv, true)) != WJB_DONE){
+    if (r == WJB_ELEM){
+      return &jv;
+    }
+  }
   return NULL;
 }
 
-Datum
+  Datum
 jsonb_as_text(PG_FUNCTION_ARGS)
 {
   Jsonb *jb = PG_GETARG_JSONB(0);
   JsonbValue *jv = JsonbToJsonbValue(jb);
-  PG_RETURN_NULL();
+  if(jv == NULL){
+    PG_RETURN_NULL();
+  }else{
+    PG_RETURN_TEXT_P(JsonbValueToText(jv));
+  }
 }
 
-Datum
+  Datum
 jsonb_extract(PG_FUNCTION_ARGS)
 {
   Jsonb *jb = PG_GETARG_JSONB(0);
@@ -113,7 +127,7 @@ jsonb_extract(PG_FUNCTION_ARGS)
 
 }
 
-Datum
+  Datum
 jsonb_extract_text(PG_FUNCTION_ARGS)
 {
   Jsonb *jb = PG_GETARG_JSONB(0);
@@ -134,7 +148,7 @@ jsonb_extract_text(PG_FUNCTION_ARGS)
     for(i=0; i< result->count; i++){
 
       /* elog(INFO, "%s", JsbvToStr(result->result[i])); */
-      texts[i] = jbvToText(result->result[i]);
+      texts[i] = JsonbValueToText(result->result[i]);
     }
     result_texts = construct_array((Datum *) texts, result->count, TEXTOID, -1, false, 'i');
     for(i=0; i< result->count; i++)
@@ -146,7 +160,7 @@ jsonb_extract_text(PG_FUNCTION_ARGS)
 }
 
 
-JbvResult
+  JbvResult
 *jsonb_extract_internal(Jsonb *jb, ArrayType *path)
 {
   Datum	  *pathtext;
@@ -174,10 +188,11 @@ JbvResult
   return result;
 }
 
-text *jbvToText(JsonbValue *v){
+text *JsonbValueToText(JsonbValue *v){
   switch(v->type)
   {
     case jbvNull:
+      return cstring_to_text(""); // better pg null?
       break;
     case jbvBool:
       return cstring_to_text(v->val.boolean ? "true" : "false");
