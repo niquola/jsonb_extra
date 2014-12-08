@@ -41,6 +41,7 @@ JsonbValue toJsonbString(Datum str);
 PG_FUNCTION_INFO_V1(jsonb_extract);
 PG_FUNCTION_INFO_V1(jsonb_extract_text);
 PG_FUNCTION_INFO_V1(jsonb_as_text);
+PG_FUNCTION_INFO_V1(jsonb_update);
 
 char *JsbvToStr(JsonbValue *v){
   Jsonb	*j;
@@ -82,6 +83,105 @@ JsonbToJsonbValue(Jsonb *v){
     }
   }
   return NULL;
+}
+
+  Datum
+jsonb_update(PG_FUNCTION_ARGS)
+{
+  Jsonb         *jb = PG_GETARG_JSONB(0);
+  ArrayType   *path = PG_GETARG_ARRAYTYPE_P(1);
+  Jsonb      *jbval = PG_GETARG_JSONB(2);
+  int type;
+  JsonbValue v;
+  char *keystr;
+  JsonbValue *res = NULL;
+  JsonbParseState *pstate = NULL;
+
+  text	  **pathtext;
+  bool	  *pathnulls;
+  int    	   npath;
+  int             path_index = 0;
+  int             level = -1;
+  bool            matched = false;
+
+  deconstruct_array(path, TEXTOID, -1, false, 'i', &pathtext, &pathnulls, &npath);
+
+  JsonbIterator *it;
+  it = JsonbIteratorInit(&jb->root);
+  elog(NOTICE, "Start\n");
+
+  while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+  {
+    switch (type)
+    {
+      case WJB_KEY:
+        elog(INFO, "* WJB_KEY");
+        debugJsonb(&v);
+        keystr = TextDatumGetCString(pathtext[path_index]);
+        if(strcmp(keystr, v.val.string.val) == 0)
+        {
+          elog(INFO, "MATCH PATH %s, level %i, path_index %i, npath %i", keystr, level, path_index, npath);
+          if(level == path_index && (npath - 1) == path_index){
+            elog(INFO, "ALLES found!!!!");
+            matched = true;
+          }else{
+            path_index++;
+            res = pushJsonbValue(&pstate, WJB_KEY, &v);
+            matched = false;
+          }
+        }else{
+          res = pushJsonbValue(&pstate, WJB_KEY, &v);
+          matched = false;
+        }
+        break;
+      case WJB_VALUE:
+        elog(INFO, "* WJB_VALUE");
+        debugJsonb(&v);
+        if(matched){
+          ;
+        }else{
+          res = pushJsonbValue(&pstate, WJB_VALUE, &v);
+        }
+        break;
+      case WJB_ELEM:
+        elog(INFO, "* WJB_ELEM");
+        debugJsonb(&v);
+        if(matched){
+          ;
+        }else{
+          res = pushJsonbValue(&pstate, WJB_ELEM, &v);
+        }
+        break;
+      case WJB_BEGIN_ARRAY:
+        elog(INFO, "* WJB_BEGIN_ARRAY");
+        res = pushJsonbValue(&pstate, WJB_BEGIN_ARRAY, &v);
+        break;
+      case WJB_END_ARRAY:
+        elog(INFO, "* WJB_END_ARRAY");
+        res = pushJsonbValue(&pstate, WJB_END_ARRAY, NULL);
+        break;
+      case WJB_BEGIN_OBJECT:
+        level++;
+        elog(INFO, "* WJB_BEGIN_OBJECT");
+        res = pushJsonbValue(&pstate, WJB_BEGIN_OBJECT, &v);
+        break;
+      case WJB_END_OBJECT:
+        level--;
+        elog(INFO, "* WJB_END_OBJECT");
+        res = pushJsonbValue(&pstate, WJB_END_OBJECT, &v);
+        matched = false;
+        break;
+      default:
+        elog(INFO, "* other");
+    }
+
+  }
+  if(res == NULL){
+    PG_RETURN_NULL();
+  }else{
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
+  }
+
 }
 
   Datum
@@ -286,22 +386,22 @@ void debugJsonb(JsonbValue *jb){
   switch (jb->type)
   {
     case jbvNull:
-      elog(DEBUG1, "D:jbvNull");
+      elog(INFO, "D:jbvNull");
       break;
     case jbvString:
-      elog(DEBUG1, "D:jbvString, %s", JsbvToStr(jb));
+      elog(INFO, "D:jbvString, %s", JsbvToStr(jb));
       break;
     case jbvNumeric:
-      elog(DEBUG1, "D:jbvNumeric, %s", JsbvToStr(jb));
+      elog(INFO, "D:jbvNumeric, %s", JsbvToStr(jb));
       break;
     case jbvBool:
-      elog(DEBUG1, "D:jbvBool");
+      elog(INFO, "D:jbvBool");
       break;
     case jbvArray:
-      elog(DEBUG1, "D:jbvArray");
+      elog(INFO, "D:jbvArray");
       break;
     case jbvObject:
-      elog(DEBUG1, "D:jbvObject");
+      elog(INFO, "D:jbvObject");
       break;
     case jbvBinary:
       elog(DEBUG1, "D:jbvBinary");
