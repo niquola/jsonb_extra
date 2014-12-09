@@ -34,6 +34,7 @@ JsonbValue *JsonbToJsonbValue(Jsonb *v);
 void addToJbvResult(JbvResult *result, JsonbValue *val);
 JbvResult *jsonb_extract_internal(Jsonb *jb, ArrayType *path);
 text *JsonbValueToText(JsonbValue *v);
+JsonbValue *pushJsonbToParseState(JsonbParseState **pstate, Jsonb *jb);
 
 JsonbValue toJsonbString(Datum str);
 /* static void recursiveAny(JsonbValue *jb); */
@@ -67,6 +68,8 @@ bool isArray(JsonbValue *v){
     return false;
   }
 }
+
+/* TODO: function returns address of local variable */
 JsonbValue *
 JsonbToJsonbValue(Jsonb *v){
   JsonbValue jv;
@@ -85,7 +88,24 @@ JsonbToJsonbValue(Jsonb *v){
   return NULL;
 }
 
-  Datum
+JsonbValue *pushJsonbToParseState(JsonbParseState **pstate, Jsonb *jb)
+{
+  JsonbIterator *it;
+  JsonbValue v;
+  int type;
+  JsonbValue *res = NULL;
+
+  it = JsonbIteratorInit(&jb->root);
+  while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+  {
+    res = pushJsonbValue(pstate, type, &v);
+  }
+  return res;
+}
+
+/* TODO: create path if not exists */
+/* TODO: support arrays */
+Datum
 jsonb_update(PG_FUNCTION_ARGS)
 {
   Jsonb         *jb = PG_GETARG_JSONB(0);
@@ -97,82 +117,69 @@ jsonb_update(PG_FUNCTION_ARGS)
   JsonbValue *res = NULL;
   JsonbParseState *pstate = NULL;
 
-  text	  **pathtext;
+  Datum	  *pathtext;
   bool	  *pathnulls;
   int    	   npath;
   int             path_index = 0;
   int             level = -1;
   bool            matched = false;
+  JsonbIterator *it;
 
   deconstruct_array(path, TEXTOID, -1, false, 'i', &pathtext, &pathnulls, &npath);
 
-  JsonbIterator *it;
   it = JsonbIteratorInit(&jb->root);
-  elog(NOTICE, "Start\n");
 
   while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
   {
     switch (type)
     {
       case WJB_KEY:
-        elog(INFO, "* WJB_KEY");
-        debugJsonb(&v);
         keystr = TextDatumGetCString(pathtext[path_index]);
         if(strcmp(keystr, v.val.string.val) == 0)
         {
-          elog(INFO, "MATCH PATH %s, level %i, path_index %i, npath %i", keystr, level, path_index, npath);
           if(level == path_index && (npath - 1) == path_index){
-            elog(INFO, "ALLES found!!!!");
             matched = true;
           }else{
             path_index++;
-            res = pushJsonbValue(&pstate, WJB_KEY, &v);
             matched = false;
           }
         }else{
           res = pushJsonbValue(&pstate, WJB_KEY, &v);
           matched = false;
         }
+        res = pushJsonbValue(&pstate, WJB_KEY, &v);
         break;
       case WJB_VALUE:
-        elog(INFO, "* WJB_VALUE");
-        debugJsonb(&v);
         if(matched){
-          ;
+          res = pushJsonbToParseState(&pstate, jbval);
         }else{
           res = pushJsonbValue(&pstate, WJB_VALUE, &v);
         }
         break;
       case WJB_ELEM:
-        elog(INFO, "* WJB_ELEM");
-        debugJsonb(&v);
         if(matched){
-          ;
+          res = pushJsonbToParseState(&pstate, jbval);
         }else{
           res = pushJsonbValue(&pstate, WJB_ELEM, &v);
         }
         break;
       case WJB_BEGIN_ARRAY:
-        elog(INFO, "* WJB_BEGIN_ARRAY");
         res = pushJsonbValue(&pstate, WJB_BEGIN_ARRAY, &v);
         break;
       case WJB_END_ARRAY:
-        elog(INFO, "* WJB_END_ARRAY");
         res = pushJsonbValue(&pstate, WJB_END_ARRAY, NULL);
         break;
       case WJB_BEGIN_OBJECT:
         level++;
-        elog(INFO, "* WJB_BEGIN_OBJECT");
         res = pushJsonbValue(&pstate, WJB_BEGIN_OBJECT, &v);
         break;
       case WJB_END_OBJECT:
         level--;
-        elog(INFO, "* WJB_END_OBJECT");
         res = pushJsonbValue(&pstate, WJB_END_OBJECT, &v);
         matched = false;
         break;
       default:
-        elog(INFO, "* other");
+        elog(INFO, "UPS");
     }
 
   }
